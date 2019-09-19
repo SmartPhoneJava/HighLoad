@@ -5,7 +5,6 @@ import java.net.ServerSocket;
 import java.net.Socket;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
-import java.nio.file.Path;
 import java.util.Date;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -13,45 +12,56 @@ import java.util.concurrent.Executors;
 class WorkerRunnable implements Runnable{
 
     protected Socket clientSocket = null;
-    protected String serverText   = null;
-    private static final String DEFAULT_FILES_DIR = "";
+    private static final String DEFAULT_FILES_DIR = System.getProperty("user.dir");
     private static final int BUFFER_SIZE = 1024;
+    private final static char CR  = (char) 0x0D;
+    private final static char LF  = (char) 0x0A;
+    private final static String CRLF  = "" + CR + LF;
 
-    WorkerRunnable(Socket clientSocket, String serverText) {
+    WorkerRunnable(Socket clientSocket) {
         this.clientSocket = clientSocket;
-        this.serverText   = serverText;
     }
 
+    @Override
     public void run() {
+        InputStream input = null;
+        OutputStream output = null;
         try {
-            InputStream input = clientSocket.getInputStream();
-            OutputStream output = clientSocket.getOutputStream();
+            input = clientSocket.getInputStream();
+            output = clientSocket.getOutputStream();
 
-            //final String dir = System.getProperty("user.dir");
-            //FileOutputStream output=new FileOutputStream(dir+"/log.txt");
+            String readRequest = readRequest(input);
+            String method = getRequestMethod(readRequest);
 
-            String header = readHeader(input);
-            System.out.println("header:"+header);
-
-            String method = getMethodFromHeader(header);
-
-            if (method == null) {
-                send(output, 403, null, 0);
-            } else if (method.equals("GET")) {
-                String url = getURIFromHeader(header);
-                sendFile(url, output, false);
-            } else if (method.equals("HEAD")) {
-                String url = getURIFromHeader(header);
-                sendFile(url, output, true);
-            } else {
-                send(output, 405, null, 0);
+            switch (method) {
+                case "GET": {
+                    String url = getRequstURL(readRequest);
+                    sendFile(url, output, false);
+                    break;
+                }
+                case "HEAD": {
+                    String url = getRequstURL(readRequest);
+                    sendFile(url, output, true);
+                    break;
+                }
+                default:
+                    writeResponseHeader(output, 405, null, 0);
             }
-
-            input.close();
-            output.close();
         } catch (IOException e) {
             e.printStackTrace();
         } finally {
+            try {
+                if (input != null)
+                    input.close();
+            } catch (IOException e) {
+                if (output != null)
+                    e.printStackTrace();
+            }
+            try {
+                output.close();
+            } catch (IOException e) {
+                e.printStackTrace();
+            }
             try {
                 clientSocket.close();
             } catch (IOException e) {
@@ -60,42 +70,61 @@ class WorkerRunnable implements Runnable{
         }
     }
 
-        private String readHeader(InputStream input) throws IOException {
-            BufferedReader reader = new BufferedReader(new InputStreamReader(input));
-            StringBuilder builder = new StringBuilder();
-            String ln = null;
-            while (true) {
-                ln = reader.readLine();
-                if (ln == null || ln.isEmpty()) {
-                    break;
-                }
-                builder.append(ln).append(System.getProperty("line.separator"));
+    /**
+     * Получить заголовок запроса
+     * @param input поток ввода
+     * @return строка, содержащая содержимое запроса
+     * @throws IOException
+     */
+    private String readRequest(InputStream input) throws IOException {
+        BufferedReader reader = new BufferedReader(new InputStreamReader(input));
+        StringBuilder builder = new StringBuilder();
+        String ln = null;
+        while (true) {
+            ln = reader.readLine();
+            if (ln == null || ln.isEmpty()) {
+                break;
             }
-            return builder.toString();
+            builder.append(ln).append(System.getProperty("line.separator"));
         }
+        return builder.toString();
+    }
 
-    private String getURIFromHeader(String header) {
+    /**
+     * Получить путь до файла
+     * @param header заголовок запроса
+     * @return null если путь до фалйа небезопасен, иначе строка с путем до файла
+     */
+    private String getRequstURL(String header) {
         int from = header.indexOf(" ") + 1;
-        if (from == 0) {
-            return "/index.html";
-        }
+        if (from == 0)
+            return DEFAULT_FILES_DIR+"/index.html";
+
         int to = header.indexOf(" ", from);
-        if (to == -1) {
-            return "/index.html";
-        }
+        if (to == -1)
+            return DEFAULT_FILES_DIR+"/index.html";
+
         String uri = header.substring(from, to);
         uri = java.net.URLDecoder.decode(uri, StandardCharsets.UTF_8);
-        if (uri.lastIndexOf("/")== uri.length()-1) {
-            return uri+"index.html";
-        }
+        if (uri.lastIndexOf("/")== uri.length()-1)
+            return DEFAULT_FILES_DIR + uri+"index.html";
+
         int paramIndex = uri.indexOf("?");
-        if (paramIndex != -1) {
+        if (paramIndex != -1)
             uri = uri.substring(0, paramIndex);
-        }
+
+        if (isURLDangerous(uri))
+            return null;
+
         return DEFAULT_FILES_DIR + uri;
     }
 
-    private String getMethodFromHeader(String header) {
+    /**
+     * Получить метод запроса
+     * @param header строка с заголовком запроса
+     * @return строка с методом
+     */
+    private static String getRequestMethod(String header) {
         int to = header.indexOf(" ");
         if (to == -1) {
             return null;
@@ -103,98 +132,120 @@ class WorkerRunnable implements Runnable{
         return header.substring(0,to);
     }
 
+    /**
+     * Отправить ответ с телом
+     * @param url путь до файла
+     * @param out поток вывода
+     * @param isHead флаг является ли метод запроса HEAD
+     */
     private void sendFile(String url, OutputStream out, Boolean isHead) {
-        final String dir = System.getProperty("user.dir");
-        int code;
-        url = dir + url;
-        if (isURLDangerous(url)) {
-            code = 403;
-            send(out, code, null, 0);
+        if (url == null) {
+            writeResponseHeader(out, 403, null, 0);
             return;
         }
+        int code = 200;
         String mime = null;
         int size = 0;
         //Boolean isText = false;
         try {
             File file = new File(url);
-
-            code = 200;
             mime = getContentType(file);
             size = (int)file.length();
+            FileInputStream fin = new FileInputStream(file);
+            //isText = (mime.indexOf("text") != -1);
+            //if (isText)
+            //    mime += "; charset=utf-8";
+            writeResponseHeader(out, code, mime, size);
 
-            FileInputStream fin = null;
-            if (!isHead) {
-                fin = new FileInputStream(file);
-                size = fin.available();
-                //isText = (mime.indexOf("text") != -1);
-                //if (isText)
-                //    mime += "; charset=utf-8";
-            }
-
-            send(out, code, mime, size);
             if (!isHead) {
                 int count;
                 byte[] buffer = new byte[BUFFER_SIZE];
                 while ((count = fin.read(buffer)) != -1) {
                     out.write(buffer, 0, count);
                 }
-                fin.close();
             }
+            fin.close();
         } catch (IOException ex) {
             ex.printStackTrace();
             code = url.contains("/index.html") ? 403 : 404;
         }
         if (code != 200)
-            send(out, code, mime, size);
+            writeResponseHeader(out, code, mime, size);
     }
 
-    private void send(OutputStream out, int code, String mime, int size) {
-        String header = getHeader(code, mime, size);
-        System.out.println("answer header:"+ header);
+    /**
+     * Записать результаты выполнения запроса в заголовки
+     * @param out поток вывода
+     * @param code http код ошибки
+     * @param mime тип файла
+     * @param size размер файла
+     */
+    private void writeResponseHeader(OutputStream out, int code, String mime, int size) {
+        String header = createResponseHeader(code, mime, size);
         PrintStream answer = new PrintStream(out, true, StandardCharsets.UTF_8);
         answer.print(header);
     }
 
-    private final static char CR  = (char) 0x0D;
-    private final static char LF  = (char) 0x0A;
-
-    private final static String CRLF  = "" + CR + LF;
-
-    private String getHeader(int code, String contentType, int conLength) {
+    /**
+     * Поместить информацию в заголовок ответа
+     * @param code код шибки
+     * @param contentType тип файла
+     * @param contentLength размер файла
+     * @return строка с заголовком
+     */
+    private String createResponseHeader(int code, String contentType, int contentLength) {
         StringBuilder buffer = new StringBuilder();
         buffer.append("HTTP/1.1 " + code + " " + getAnswer(code) + CRLF);
-
-        buffer.append("Server: " + "Java web-server"+ CRLF);
-        buffer.append("Connection: " + "close"+ CRLF);
+        buffer.append("Server: " + "Java web-server" + CRLF);
+        buffer.append("Connection: " + "close" + CRLF);
         buffer.append("Date: " + new Date() + CRLF);
-        buffer.append("Accept-Ranges: none "+CRLF);
+        buffer.append("Accept-Ranges: none " + CRLF);
         if (code == 200) {
             if (contentType != null)
                 buffer.append("Content-Type: ").append(contentType).append(CRLF);
-            if (conLength != 0)
-                buffer.append("Content-Length: ").append(conLength).append(CRLF);
+            if (contentLength != 0)
+                buffer.append("Content-Length: ").append(contentLength).append(CRLF);
         }
         buffer.append(CRLF);
-
         return buffer.toString();
     }
 
+    /**
+     * Получить тип файла
+     * @param file файл
+     * @return тип файла
+     * @throws IOException
+     */
     private String getContentType(File file) throws IOException {
-        Path path = file.toPath();
-        return Files.probeContentType(path);
+        return Files.probeContentType(file.toPath());
     }
 
+    /**
+     * Получить комменатрией к коду ошибки
+     * @param code код ошибки
+     * @return комментарий
+     */
     private String getAnswer(int code) {
         switch (code) {
             case 200:
                 return "OK";
+            case 403:
+                return "Forbidden";
             case 404:
                 return "Not Found";
+            case 405:
+                return "Method not allowed";
             default:
                 return "Internal Server Error";
         }
     }
 
+    /**
+     * Определить количество вхождений подстроки subStr в строку origin
+     * @param origin подстрока, которая ищется в оригинальной строке
+     * @param subStr строка, в которой проходит поиск подстроки
+     * @return количество вхождений
+     */
     private int subStrInStr(String origin, String subStr) {
         int count = 0;
         while (origin.contains(subStr)){
@@ -203,19 +254,20 @@ class WorkerRunnable implements Runnable{
         }
         return count ;
     }
+
+    /**
+     * Определить, обращается ли путь к файлам, которые находятся вне данной директории
+     * @param url
+     * @return
+     */
     private Boolean isURLDangerous(String url) {
         int nesting = 0;
-        int backnesting = 0;
-        backnesting = subStrInStr(url, "/..");
+        int backnesting = subStrInStr(url, "/..");
         if (backnesting > 0) {
             nesting = subStrInStr(url, "/") - 2 * backnesting;
             return nesting < 0;
         }
         return false;
-    }
-
-    private Boolean isFilenameAbsent(String url) {
-        return url.contains("..");
     }
 }
 
@@ -226,12 +278,16 @@ public class Server implements Runnable {
     private boolean isStopped = false;
     private Thread runningThread = null;
     private ExecutorService threadPool =
-            Executors.newFixedThreadPool(10);
+            Executors.newFixedThreadPool(5);
 
     public Server(int port) {
         this.serverPort = port;
     }
 
+    /**
+     * Запустить сервер
+     */
+    @Override
     public void run() {
         synchronized (this) {
             this.runningThread = Thread.currentThread();
@@ -241,6 +297,7 @@ public class Server implements Runnable {
         while(! isStopped()){
             Socket clientSocket = null;
             try {
+                // ждём, пока кто нибудь подключится
                 clientSocket = this.serverSocket.accept();
             } catch (IOException e) {
                 if(isStopped()) {
@@ -250,19 +307,24 @@ public class Server implements Runnable {
                 throw new RuntimeException(
                         "Error accepting client connection", e);
             }
-
             this.threadPool.execute(
-                    new WorkerRunnable(clientSocket, "Thread Pooled Server"));
+                    new WorkerRunnable(clientSocket));
 
         }
 
         System.out.println("Server Stopped.");
     }
 
+    /**
+     * @return флаг остновки
+     */
     private synchronized boolean isStopped() {
         return this.isStopped;
     }
 
+    /**
+     * Останавить работу сервера
+     */
     public synchronized void stop() {
         this.isStopped = true;
         try {
@@ -272,6 +334,10 @@ public class Server implements Runnable {
         }
     }
 
+
+    /**
+     * Запустить сервер на указанном порте
+     */
     private void openServerSocket() {
         try {
             this.serverSocket = new ServerSocket(this.serverPort);
@@ -283,4 +349,4 @@ public class Server implements Runnable {
     }
 }
 
-// 393 -> 380 -> 350 -> 314
+// 393 -> 380 -> 350 -> 314 -> 352
