@@ -301,7 +301,7 @@ public class Server implements Runnable {
     private ServerSocket serverSocket = null;
     private boolean isStopped = false;
     private ExecutorService threadPool =
-            Executors.newFixedThreadPool(2);
+            Executors.newFixedThreadPool(100);
 
     public Server(int port) {
         this.serverPort = port;
