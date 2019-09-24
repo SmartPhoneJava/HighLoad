@@ -3,11 +3,14 @@ package github.smartphonejava.highloadwebserver;
 import java.io.*;
 import java.net.ServerSocket;
 import java.net.Socket;
+import java.net.SocketException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.util.Date;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+
+import static java.lang.Thread.sleep;
 
 class WorkerRunnable implements Runnable{
 
@@ -26,13 +29,32 @@ class WorkerRunnable implements Runnable{
     public void run() {
         InputStream input = null;
         OutputStream output = null;
+
+        try {
+            clientSocket.setSoTimeout(10000);
+        } catch (SocketException e) {
+            e.printStackTrace();
+        }
+        //System.out.println("sleeeep");
+        /*
+        try {
+            sleep(10000);
+        } catch (InterruptedException e) {
+            e.printStackTrace();
+        }*/
+        //System.out.println("wake up");
         try {
             input = clientSocket.getInputStream();
             output = clientSocket.getOutputStream();
 
+            System.out.println("clientSocket socket:"+ clientSocket.getPort());
+
             String readRequest = readRequest(input);
             String method = getRequestMethod(readRequest);
 
+            if (method == null) {
+                throw new IOException();
+            }
             switch (method) {
                 case "GET": {
                     String url = getRequstURL(readRequest);
@@ -54,11 +76,11 @@ class WorkerRunnable implements Runnable{
                 if (input != null)
                     input.close();
             } catch (IOException e) {
-                if (output != null)
-                    e.printStackTrace();
+                e.printStackTrace();
             }
             try {
-                output.close();
+                if (output != null)
+                    output.close();
             } catch (IOException e) {
                 e.printStackTrace();
             }
@@ -125,8 +147,10 @@ class WorkerRunnable implements Runnable{
      * @return строка с методом
      */
     private static String getRequestMethod(String header) {
+        System.out.println("getRequestMethod:"+header);
         int to = header.indexOf(" ");
         if (to == -1) {
+            System.out.println("noo:"+header);
             return null;
         }
         return header.substring(0,to);
@@ -276,9 +300,8 @@ public class Server implements Runnable {
     private int serverPort = 8080;
     private ServerSocket serverSocket = null;
     private boolean isStopped = false;
-    private Thread runningThread = null;
     private ExecutorService threadPool =
-            Executors.newFixedThreadPool(5);
+            Executors.newFixedThreadPool(100);
 
     public Server(int port) {
         this.serverPort = port;
@@ -289,19 +312,17 @@ public class Server implements Runnable {
      */
     @Override
     public void run() {
-        synchronized (this) {
-            this.runningThread = Thread.currentThread();
-        }
         openServerSocket();
 
         while(! isStopped()){
             Socket clientSocket = null;
             try {
                 // ждём, пока кто нибудь подключится
+                System.out.println("wait");
                 clientSocket = this.serverSocket.accept();
+                System.out.println("accept");
             } catch (IOException e) {
                 if(isStopped()) {
-                    System.out.println("Server Stopped.") ;
                     break;
                 }
                 throw new RuntimeException(
@@ -311,8 +332,12 @@ public class Server implements Runnable {
                     new WorkerRunnable(clientSocket));
 
         }
-
         System.out.println("Server Stopped.");
+    }
+
+    public void shutdown() {
+        this.stop();
+        System.err.println("shutdown");
     }
 
     /**

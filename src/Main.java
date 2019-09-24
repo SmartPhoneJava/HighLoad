@@ -11,15 +11,9 @@ public class Main {
         }
 
         Server server = new Server(port);
-        new Thread(server).start();
-        System.out.println("Start Server on "+port);
-        while (true)
-            try {
-                Thread.sleep(1000);
-            } catch (InterruptedException e) {
-                e.printStackTrace();
-                System.out.println("Stopping Server");
-                server.stop();
-            }
+        Runtime.getRuntime().addShutdownHook(new Thread(){public void run(){
+            server.shutdown();
+        }});
+        server.run();
     }
 }
