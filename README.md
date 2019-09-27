@@ -70,8 +70,21 @@ Percentage of the requests served within a certain time (ms)
 Таблицы здесь и далее преобразованы в markdown с помощью чудесного сервиса https://tablesgenerator.com/markdown_tables
 
 #### Сравнение с nginx
-Для сравнение аналогичное тестирование производилось с использованием nginx с конфигурацией: 
-256 процессов(worker_processes)
+Для сравнения аналогичное тестирование производилось с использованием nginx.
+
+Конфигурация nginx `/etc/nginx/nginx.conf` 
+
+>...  
+worker_processes 256;  
+...  
+> events {
+    ...  
+	 worker_connections 2560;  
+>  ...  
+}  
+>...
+ 
+`ab -n 10000 -c 500 http://localhost:80/httptest/wikipedia_russia.html`
 
 |                       |                                                   |
 |-----------------------|---------------------------------------------------|
@@ -112,3 +125,4 @@ Percentage of the requests served within a certain time (ms)
 | 98%    | 219                   |
 | 99%    | 238                   |
 | 100%   | 252 (longest request) |
+
