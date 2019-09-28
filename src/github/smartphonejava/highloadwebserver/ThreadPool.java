@@ -5,12 +5,13 @@ import java.util.List;
 
 public class ThreadPool {
     private BlockingQueue<Runnable> tasks;
-    private List<TaskExecutor> threadsList = new ArrayList();
+    private ArrayList<TaskExecutor> threadsList;
     boolean isStopped = false;
 
     ThreadPool(int threadsMaxAmount, int tasksMaxAmount) {
-        tasks = new BlockingQueue(tasksMaxAmount);
+        tasks = new BlockingQueue<>(tasksMaxAmount);
         TaskExecutor executor = new TaskExecutor(tasks);
+        threadsList = new ArrayList<>();
         for (int i = 0; i < threadsMaxAmount; i++)
             threadsList.add(executor);
     }

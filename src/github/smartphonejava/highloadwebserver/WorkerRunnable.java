@@ -6,16 +6,23 @@ import java.net.Socket;
 import java.net.SocketException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.util.Date;
 
-class WorkerRunnable implements Runnable{
+class Request {
+    String method, url;
+}
+
+
+class WorkerRunnable implements Runnable {
 
     protected Socket clientSocket = null;
     private static String DEFAULT_FILES_DIR;
     private static final int BUFFER_SIZE = 1024;
-    private final static char CR  = (char) 0x0D;
-    private final static char LF  = (char) 0x0A;
-    private final static String CRLF  = "" + CR + LF;
+    private final static char CR = (char) 0x0D;
+    private final static char LF = (char) 0x0A;
+    private final static String CRLF = "" + CR + LF;
 
     WorkerRunnable(Socket clientSocket, String path) {
         this.clientSocket = clientSocket;
@@ -37,11 +44,21 @@ class WorkerRunnable implements Runnable{
             output = clientSocket.getOutputStream();
 
             String readRequest = readRequest(input);
-            String method = getRequestMethod(readRequest);
+            Request request = getRequest(readRequest);
 
-            if (method == null)
+            System.out.println("request:" + request.method + " " + request.url);
+
+            if (request.method == null)
                 throw new IOException();
-
+            if (request.method.equals("GET")) {
+                sendFile(request.url, output, false);
+            } else if (request.method.equals("HEAD")) {
+                sendFile(request.url, output, true);
+            } else {
+                System.out.println("wrong");
+                writeResponseHeader(output, 405, null, 0);
+            }
+            /*
             switch (method) {
                 case "GET": {
                     String url = getRequstURL(readRequest);
@@ -55,7 +72,10 @@ class WorkerRunnable implements Runnable{
                 }
                 default:
                     writeResponseHeader(output, 405, null, 0);
-            }
+            }*/
+            //for (int i = 0; i < 10000000; i++) {
+            //    System.out.println("some"+i);
+            //}
         } catch (IOException e) {
             //e.printStackTrace();
         } finally {
@@ -81,6 +101,7 @@ class WorkerRunnable implements Runnable{
 
     /**
      * Получить заголовок запроса
+     *
      * @param input поток ввода
      * @return строка, содержащая содержимое запроса
      * @throws IOException
@@ -101,52 +122,66 @@ class WorkerRunnable implements Runnable{
 
     /**
      * Получить путь до файла
+     *
      * @param header заголовок запроса
      * @return null если путь до фалйа небезопасен, иначе строка с путем до файла
      */
-    private String getRequstURL(String header) {
+    private static Request getRequest(String header) {
+        Request request = new Request();
+        request.url = DEFAULT_FILES_DIR + "/index.html";
+
         int from = header.indexOf(" ") + 1;
         if (from == 0)
-            return DEFAULT_FILES_DIR+"/index.html";
+            return request;
+        request.method = header.substring(0, from - 1);
 
         int to = header.indexOf(" ", from);
         if (to == -1)
-            return DEFAULT_FILES_DIR+"/index.html";
+            return request;
 
-        String uri = header.substring(from, to);
-        uri = java.net.URLDecoder.decode(uri, StandardCharsets.UTF_8);
-        if (uri.lastIndexOf("/")== uri.length()-1)
-            return DEFAULT_FILES_DIR + uri+"index.html";
+        request.url = java.net.URLDecoder.decode(header.substring(from, to), StandardCharsets.UTF_8);
+        if (request.url.lastIndexOf("/") == request.url.length() - 1)
+            request.url += "index.html";
 
-        int paramIndex = uri.indexOf("?");
+        int paramIndex = request.url.indexOf("?");
         if (paramIndex != -1)
-            uri = uri.substring(0, paramIndex);
+            request.url = request.url.substring(0, paramIndex);
 
-        if (isURLDangerous(uri))
-            return null;
+        request.url = DEFAULT_FILES_DIR + request.url;
 
-        return DEFAULT_FILES_DIR + uri;
+        return request;
     }
 
-    /**
-     * Получить метод запроса
-     * @param header строка с заголовком запроса
-     * @return строка с методом
-     */
-    private static String getRequestMethod(String header) {
-        //System.out.println("getRequestMethod:"+header);
-        int to = header.indexOf(" ");
-        if (to == -1) {
-            // System.out.println("noo:"+header);
-            return null;
-        }
-        return header.substring(0,to);
+    // with non-blocking read
+    private void nwr(String url, OutputStream out, Boolean isHead) throws IOException {
+        // delete .. and .
+        Path resource = Paths.get(url).normalize();
+
+        //int random_number1 = a + (int) (Math.random() * b);
+
+        // now can check if path dangerous
+        int index = resource.toString().lastIndexOf(DEFAULT_FILES_DIR);
+        if (index < 0)
+            throw new IOException("dangerous url:" + resource);
+        File file = resource.toFile();
+
+        if (!file.exists())
+            throw new IOException("no file");
+
+        String mime = getContentType(file);
+        int size = (int) file.length();
+
+        writeResponseHeader(out, 200, mime, size);
+        byte[] lines = Files.readAllBytes(resource);
+        if (!isHead)
+            out.write(lines);
     }
 
     /**
      * Отправить ответ с телом
-     * @param url путь до файла
-     * @param out поток вывода
+     *
+     * @param url    путь до файла
+     * @param out    поток вывода
      * @param isHead флаг является ли метод запроса HEAD
      */
     private void sendFile(String url, OutputStream out, Boolean isHead) {
@@ -155,38 +190,19 @@ class WorkerRunnable implements Runnable{
             return;
         }
         int code = 200;
-        String mime = null;
-        int size = 0;
-        //Boolean isText = false;
         try {
-            File file = new File(url);
-            mime = getContentType(file);
-            size = (int)file.length();
-            FileInputStream fin = new FileInputStream(file);
-            //isText = (mime.indexOf("text") != -1);
-            //if (isText)
-            //    mime += "; charset=utf-8";
-            writeResponseHeader(out, code, mime, size);
-
-            if (!isHead) {
-                int count;
-                byte[] buffer = new byte[BUFFER_SIZE];
-                while ((count = fin.read(buffer)) != -1) {
-                    out.write(buffer, 0, count);
-                }
-            }
-            fin.close();
-        } catch (IOException ex) {
-            ex.printStackTrace();
+            nwr(url, out, isHead);
+        } catch (Exception e) {
             code = url.contains("/index.html") ? 403 : 404;
         }
         if (code != 200)
-            writeResponseHeader(out, code, mime, size);
+            writeResponseHeader(out, code, null, 0);
     }
 
     /**
      * Записать результаты выполнения запроса в заголовки
-     * @param out поток вывода
+     *
+     * @param out  поток вывода
      * @param code http код ошибки
      * @param mime тип файла
      * @param size размер файла
@@ -199,8 +215,9 @@ class WorkerRunnable implements Runnable{
 
     /**
      * Поместить информацию в заголовок ответа
-     * @param code код шибки
-     * @param contentType тип файла
+     *
+     * @param code          код шибкии
+     * @param contentType   тип файла
      * @param contentLength размер файла
      * @return строка с заголовком
      */
@@ -223,6 +240,7 @@ class WorkerRunnable implements Runnable{
 
     /**
      * Получить тип файла
+     *
      * @param file файл
      * @return тип файла
      * @throws IOException
@@ -233,6 +251,7 @@ class WorkerRunnable implements Runnable{
 
     /**
      * Получить комменатрией к коду ошибки
+     *
      * @param code код ошибки
      * @return комментарий
      */
@@ -249,35 +268,5 @@ class WorkerRunnable implements Runnable{
             default:
                 return "Internal Server Error";
         }
-    }
-
-    /**
-     * Определить количество вхождений подстроки subStr в строку origin
-     * @param origin подстрока, которая ищется в оригинальной строке
-     * @param subStr строка, в которой проходит поиск подстроки
-     * @return количество вхождений
-     */
-    private int subStrInStr(String origin, String subStr) {
-        int count = 0;
-        while (origin.contains(subStr)){
-            origin = origin.replaceFirst(subStr, "");
-            count++;
-        }
-        return count ;
-    }
-
-    /**
-     * Определить, обращается ли путь к файлам, которые находятся вне данной директории
-     * @param url
-     * @return
-     */
-    private Boolean isURLDangerous(String url) {
-        int nesting = 0;
-        int backnesting = subStrInStr(url, "/..");
-        if (backnesting > 0) {
-            nesting = subStrInStr(url, "/") - 2 * backnesting;
-            return nesting < 0;
-        }
-        return false;
     }
 }

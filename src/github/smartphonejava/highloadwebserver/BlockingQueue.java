@@ -4,7 +4,7 @@ import java.util.LinkedList;
 import java.util.List;
 
 class BlockingQueue<T> {
-    private List queue = new LinkedList();
+    private List<Object> queue = new LinkedList<>();
     private int limit;
 
     BlockingQueue(int limit) {
