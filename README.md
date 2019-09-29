@@ -22,7 +22,7 @@ Licensed to The Apache Software Foundation, http://www.apache.org/
 
 `ab -n 10000 -c 500 http://localhost:8081/httptest/wikipedia_russia.html`
 
-
+##### [Версия с блокирующим чтением](https://github.com/SmartPhoneJava/HighLoadWebserver/commit/90d82486e79acae989585bd8b292e916171e2e03) (java IO) 
 |                       |                                                   |
 |-----------------------|---------------------------------------------------|
 | Server Software:      | Java                                              |
@@ -42,7 +42,6 @@ Licensed to The Apache Software Foundation, http://www.apache.org/
 | Transfer rate:        | 243969.99 [Kbytes/sec] received                   |
 
 Connection Times (ms)
-
 
 |             |               |      |         |        |      |
 |-------------|---------------|------|---------|--------|------|
@@ -66,6 +65,50 @@ Percentage of the requests served within a certain time (ms)
 | 99%  | 2121                   |
 | 100% | 2133 (longest request) |
 |      |                        |
+
+##### [Версия с неблокирующим чтением ](https://github.com/SmartPhoneJava/HighLoadWebserver/commit/86dbf50f3d31ebb69271ddea8310b8a77ac39a8c) (java NIO) 
+
+|                       |                                                   |
+|-----------------------|---------------------------------------------------|
+| Server Software:      | Java                                              |
+| Server Hostname:      | localhost                                         |
+| Server Port:          | 8081                                              |
+| Document Path:        | /httptest/wikipedia_russia.html                   |
+| Document Length:      | 954824 bytes                                      |
+| Concurrency Level:    | 500                                               |
+| Time taken for tests: | 8.850 seconds                                     |
+| Complete requests:    | 10000                                             |
+| Failed requests:      | 0                                                 |
+| Total transferred:    | 9549940000 bytes                                  |
+| HTML transferred:     | 9548240000 bytes                                  |
+| Requests per second:  | 1129.99 [#/sec] (mean)                            |
+| Time per request:     | 442.484 [ms] (mean)                               |
+| Time per request:     | 0.885 [ms] (mean, across all concurrent requests) |
+| Transfer rate:        | 1053837.29 [Kbytes/sec] received                  |
+
+Connection Times (ms)
+
+|             |     |           |         |        |      |
+|-------------|-----|-----------|---------|--------|------|
+|             | min | mean      | [+/-sd] | median | max  |
+| Connect:    | 0   | 46 211.7  | 0       | 1040   | 1040 |
+| Processing: | 48  | 387 104.9 | 390     | 701    | 701  |
+| Waiting:    | 47  | 386 105.0 | 389     | 700    | 700  |
+| Total:      | 48  | 433 233.7 | 391     | 1735   | 1735 |
+
+Percentage of the requests served within a certain time (ms)
+
+|      |                        |
+|------|------------------------|
+| 50%  | 391                    |
+| 66%  | 397                    |
+| 75%  | 405                    |
+| 80%  | 416                    |
+| 90%  | 487                    |
+| 95%  | 697                    |
+| 98%  | 1454                   |
+| 99%  | 1586                   |
+| 100% | 1735 (longest request) |
 
 Таблицы здесь и далее преобразованы в markdown с помощью чудесного сервиса https://tablesgenerator.com/markdown_tables
 

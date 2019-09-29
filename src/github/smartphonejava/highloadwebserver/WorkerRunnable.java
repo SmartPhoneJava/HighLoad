@@ -1,21 +1,33 @@
 package github.smartphonejava.highloadwebserver;
 
 
+import sun.nio.ch.FileChannelImpl;
+
 import java.io.*;
 import java.net.Socket;
 import java.net.SocketException;
+import java.nio.ByteBuffer;
+import java.nio.MappedByteBuffer;
+import java.nio.channels.Channels;
+import java.nio.channels.FileChannel;
+import java.nio.channels.SeekableByteChannel;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.util.Arrays;
 import java.util.Date;
+import java.util.concurrent.RecursiveAction;
+import java.util.stream.Stream;
+
+import static java.nio.file.Files.newByteChannel;
 
 class Request {
     String method, url;
 }
 
 
-class WorkerRunnable implements Runnable {
+class WorkerRunnable extends RecursiveAction implements Runnable {
 
     protected Socket clientSocket = null;
     private static String DEFAULT_FILES_DIR;
@@ -23,16 +35,19 @@ class WorkerRunnable implements Runnable {
     private final static char CR = (char) 0x0D;
     private final static char LF = (char) 0x0A;
     private final static String CRLF = "" + CR + LF;
+    private int id;
 
-    WorkerRunnable(Socket clientSocket, String path) {
+    WorkerRunnable(Socket clientSocket, String path, int id) {
         this.clientSocket = clientSocket;
+        this.id = id;
         DEFAULT_FILES_DIR = System.getProperty("user.dir") + path;
     }
 
     @Override
-    public void run() {
+    public void compute() {
         InputStream input = null;
         OutputStream output = null;
+        System.out.println("message from"+ id);
 
         try {
             clientSocket.setSoTimeout(10000);
@@ -40,14 +55,15 @@ class WorkerRunnable implements Runnable {
             //e.printStackTrace();
         }
         try {
+            System.out.println("message from"+ id);
             input = clientSocket.getInputStream();
             output = clientSocket.getOutputStream();
 
             String readRequest = readRequest(input);
             Request request = getRequest(readRequest);
 
-            System.out.println("request:" + request.method + " " + request.url);
-
+            //System.out.println("request:" + request.method + " " + request.url);
+            System.out.println("message from"+ id);
             if (request.method == null)
                 throw new IOException();
             if (request.method.equals("GET")) {
@@ -58,24 +74,6 @@ class WorkerRunnable implements Runnable {
                 System.out.println("wrong");
                 writeResponseHeader(output, 405, null, 0);
             }
-            /*
-            switch (method) {
-                case "GET": {
-                    String url = getRequstURL(readRequest);
-                    sendFile(url, output, false);
-                    break;
-                }
-                case "HEAD": {
-                    String url = getRequstURL(readRequest);
-                    sendFile(url, output, true);
-                    break;
-                }
-                default:
-                    writeResponseHeader(output, 405, null, 0);
-            }*/
-            //for (int i = 0; i < 10000000; i++) {
-            //    System.out.println("some"+i);
-            //}
         } catch (IOException e) {
             //e.printStackTrace();
         } finally {
@@ -167,14 +165,74 @@ class WorkerRunnable implements Runnable {
 
         if (!file.exists())
             throw new IOException("no file");
-
+        System.out.println("message from"+ id);
         String mime = getContentType(file);
+        /*if (mime.equals("text/html")) {
+            return;
+        }*/
         int size = (int) file.length();
 
         writeResponseHeader(out, 200, mime, size);
-        byte[] lines = Files.readAllBytes(resource);
-        if (!isHead)
-            out.write(lines);
+
+        //byte[] bb = ("что то здесь не\n так\n".getBytes(StandardCharsets.UTF_8));
+        //System.out.println("lens:"+ bb.length+" "+"что то здесь не\n так\n".length());
+
+       /*
+        int i = 0;
+        try(Stream<String> lines1 = Files.lines(resource)){
+            for( String line : (Iterable<String>) lines1::iterator ) {
+                //byte[] bytes = null;
+                //Arrays.toString(bytes);
+                //System.out.println(line);
+                //out.write(line.toCharArray() getBytes(StandardCharsets.UTF_8));
+                //out.write("1".getBytes());
+            }
+        }*/
+
+        if (!isHead) {
+            RandomAccessFile aFile = new RandomAccessFile
+                    (resource.toString(), "r");
+            FileChannel inChannel = aFile.getChannel();
+
+            byte[] byteArray = new byte[3080];
+            ByteBuffer buffer = ByteBuffer.wrap(byteArray);
+            while(inChannel.read(buffer) > 0)
+            {
+                buffer.flip();
+                out.write(byteArray);
+                buffer.clear(); // do something with the data and clear/compact it.
+            }
+            inChannel.close();
+            aFile.close();
+
+            //byte[] byteArray = new byte[18680 ];
+            /*
+            ByteBuffer buf = ByteBuffer.allocate(2048);;
+            FileInputStream in = new FileInputStream(file);
+            int len = 1;
+            FileChannel fc = in.getChannel();
+            int i = 1;
+            while (len >= 0) {
+                len = fc.read(buf);
+                System.out.println("sssss "+ len);
+                //out.write(byteArray);
+                out.write(buf);
+                if (i == 0)
+                    break;
+                if (len == 0) {
+                    i = 0;
+                }
+            }
+            buf.clear();
+            in.close();
+            fc.close();*/
+        }
+
+        //byte[] lines = Files.readAllBytes(resource);
+        System.out.println("message from"+ id);
+        //if (!isHead)
+        //    out.write(lines);
+        System.out.println("message from"+ id);
     }
 
     /**
@@ -189,6 +247,7 @@ class WorkerRunnable implements Runnable {
             writeResponseHeader(out, 403, null, 0);
             return;
         }
+        System.out.println("message from"+ id);
         int code = 200;
         try {
             nwr(url, out, isHead);
@@ -268,5 +327,10 @@ class WorkerRunnable implements Runnable {
             default:
                 return "Internal Server Error";
         }
+    }
+
+    @Override
+    public void run() {
+        compute();
     }
 }

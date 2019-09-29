@@ -11,10 +11,11 @@ public class Server implements Runnable {
     private ServerSocket serverSocket = null;
     private boolean isStopped = false;
     private ThreadPool threadPool;
+    private final int TASKS_AMOUNT = 10000;
 
     public Server(int port, int cpu_limit, int thread_limit, String path) {
         this.serverPort = port;
-        this.threadPool =  new ThreadPool(thread_limit, thread_limit*10);
+        this.threadPool =  new ThreadPool(thread_limit, TASKS_AMOUNT);
         this.path = path;
     }
 
@@ -37,7 +38,9 @@ public class Server implements Runnable {
                 throw new RuntimeException(
                         "Error accepting client connection", e);
             }
-            this.threadPool.submitTask(new WorkerRunnable(clientSocket, path));
+            int random_number = 0 + (int) (Math.random() * 10000);
+            System.out.println("rn:"+random_number);
+            this.threadPool.submitTask(new WorkerRunnable(clientSocket, path, random_number));
         }
         System.out.println("Server Stopped.");
     }
